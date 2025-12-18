@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>自訂進階轉盤 V3</title>
+    <style>
+        body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #eff2f5; display: flex; flex-direction: column; align-items: center; margin: 0; padding-bottom: 50px; }
+        
+        /* 轉盤外殼 */
+        #main-container { position: relative; width: 340px; height: 340px; margin-top: 30px; user-select: none; }
+        #wheel-svg { width: 100%; height: 100%; transform: rotate(-90deg); transition: transform 2s cubic-bezier(0.1, 0, 0.2, 1); }
+        
+        /* 指針 */
+        .pointer { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 18px solid transparent; border-right: 18px solid transparent; border-top: 35px solid #ff4757; z-index: 10; filter: drop-shadow(0 3px 5px rgba(0,0,0,0.3)); }
+
+        /* 控制區 */
+        .controls { width: 92%; max-width: 450px; margin-top: 30px; background: white; padding: 20px; border-radius: 25px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); box-sizing: border-box; }
+        .spin-btn { width: 100%; padding: 18px; background: linear-gradient(135deg, #6c5ce7, #a29bfe); color: white; border: none; border-radius: 50px; font-size: 20px; font-weight: bold; margin-bottom: 25px; box-shadow: 0 6px 20px rgba(108, 92, 231, 0.3); cursor: pointer; }
+        .spin-btn:active { transform: scale(0.96); }
+        
+        /* 設定列 */
+        .item-row { display: flex; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+        .img-preview { width: 45px; height: 45px; border-radius: 10px; object-fit: cover; background: #f8f9fa; border: 1px solid #ddd; flex-shrink: 0; }
+        .color-picker { width: 35px; height: 35px; border: none; padding: 0; background: none; cursor: pointer; flex-shrink: 0; }
+        .text-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+        
+        .slice-ctrl { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; font-weight: bold; color: #444; }
+        input[type="number"] { width: 60px; padding: 8px; border-radius: 8px; border: 1px solid #ddd; text-align: center; }
+        .hidden-file { display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="main-container">
+        <div class="pointer"></div>
+        <svg id="wheel-svg" viewBox="0 0 100 100"></svg>
+    </div>
+
+    <div class="controls">
+        <button class="spin-btn" onclick="spinWheel()">🔥 開始旋轉！</button>
+        
+        <div class="slice-ctrl">
+            <span>轉盤區塊數量 (2-8)</span>
+            <input type="number" id="sliceCount" min="2" max="8" value="4" onchange="updateSliceNumber()">
+        </div>
+
+        <div id="edit-list"></div>
+    </div>
+
+    <script>
+        const svg = document.getElementById('wheel-svg');
+        const editList = document.getElementById('edit-list');
+        let slices = [];
+        let currentRotation = 0;
+        let isSpinning = false;
+
+        // 預設12色
+        const presetColors = ["#ffadad", "#ffd6a5", "#fdffb6", "#caffbf", "#9bf6ff", "#a0c4ff", "#bdb2ff", "#ffc6ff", "#ff9ff3", "#feca57", "#54a0ff", "#48dbfb"];
+
+        function initApp() {
+            // 初始預設 4 個區塊
+            updateSliceNumber();
+        }
+
+        function updateSliceNumber() {
+            const count = parseInt(document.getElementById('sliceCount').value);
+            const oldSlices = [...slices];
+            slices = [];
+            for (let i = 0; i < count; i++) {
+                slices.push(oldSlices[i] || {
+                    text: `選項${i+1}`,
+                    img: '',
+                    color: presetColors[i % presetColors.length]
+                });
+            }
+            drawWheel();
+            renderSettings();
+        }
+
+        function drawWheel() {
+            svg.innerHTML = '';
+            const n = slices.length;
+            const angleStep = 360 / n;
+
+            slices.forEach((slice, i) => {
+                const startAngle = i * angleStep;
+                const endAngle = (i + 1) * angleStep;
+                const rad1 = (Math.PI * startAngle) / 180;
+                const rad2 = (Math.PI * endAngle) / 180;
+                
+                const x1 = 50 + 50 * Math.cos(rad1);
+                const y1 = 50 + 50 * Math.sin(rad1);
+                const x2 = 50 + 50 * Math.cos(rad2);
+                const y2 = 50 + 50 * Math.sin(rad2);
+                const largeArc = angleStep > 180 ? 1 : 0;
+
+                // 畫扇形
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                path.setAttribute("d", `M 50 50 L ${x1} ${y1} A 50 50 0 ${largeArc} 1 ${x2} ${y2} Z`);
+                path.setAttribute("fill", slice.color);
+                path.setAttribute("stroke", "#ffffff");
+                path.setAttribute("stroke-width", "0.8");
+                svg.appendChild(path);
+
+                // 文字群組
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                const middleAngle = startAngle + (angleStep / 2);
+                g.setAttribute("transform", `rotate(${middleAngle}, 50, 50)`);
+
+                // --- 動態字體演算法 ---
+                const textLen = slice.text.length;
+                let fontSize = 5; // 預設值
+                let yOffset = 52;
+
+                if (textLen === 1) {
+                    fontSize = 20; // 約 4-5 倍
+                    yOffset = 56;
+                } else if (textLen === 2) {
+                    fontSize = 14; // 約 3 倍
+                    yOffset = 55;
+                } else if (textLen === 3) {
+                    fontSize = 9;
+                    yOffset = 53;
+                } else {
+                    fontSize = 5;
+                    yOffset = 52;
+                }
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", "72");
+                text.setAttribute("y", yOffset);
+                text.setAttribute("fill", "#333");
+                text.setAttribute("font-size", fontSize);
+                text.setAttribute("font-weight", "bold");
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("transform", `rotate(90, 72, ${yOffset - 2})`); 
+                text.textContent = slice.text;
+                g.appendChild(text);
+
+                // 圖片
+                if (slice.img) {
+                    const img = document.createElementNS("http://www.w3.org/2000/svg", "image");
+                    img.setAttributeNS("http://www.w3.org/1999/xlink", "href", slice.img);
+                    // 如果字很大，圖片稍微往外推
+                    const imgX = textLen <= 2 ? 82 : 75; 
+                    img.setAttribute("x", imgX);
+                    img.setAttribute("y", "40");
+                    img.setAttribute("width", "15");
+                    img.setAttribute("height", "15");
+                    img.setAttribute("transform", `rotate(90, ${imgX + 7.5}, 47.5)`);
+                    g.appendChild(img);
+                }
+
+                svg.appendChild(g);
+            });
+        }
+
+        function renderSettings() {
+            editList.innerHTML = '';
+            slices.forEach((slice, i) => {
+                const row = document.createElement('div');
+                row.className = 'item-row';
+                row.innerHTML = `
+                    <img src="${slice.img || 'https://via.placeholder.com/50?text=圖'}" class="img-preview" onclick="triggerFile(${i})">
+                    <input type="color" class="color-picker" value="${slice.color}" onchange="updateColor(${i}, this.value)">
+                    <input type="text" class="text-input" value="${slice.text}" placeholder="輸入文字" oninput="updateText(${i}, this.value)">
+                    <input type="file" id="file-${i}" class="hidden-file" accept="image/*" onchange="updateImg(${i}, this)">
+                `;
+                editList.appendChild(row);
+            });
+        }
+
+        function updateColor(i, val) {
+            slices[i].color = val;
+            drawWheel();
+        }
+
+        function updateText(i, val) {
+            slices[i].text = val;
+            drawWheel();
+        }
+
+        function triggerFile(i) { document.getElementById(`file-${i}`).click(); }
+
+        function updateImg(i, input) {
+            const file = input.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    slices[i].img = e.target.result;
+                    drawWheel();
+                    renderSettings();
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function spinWheel() {
+            if (isSpinning) return;
+            isSpinning = true;
+            const extraDeg = Math.floor(Math.random() * 360) + 1800; 
+            currentRotation += extraDeg;
+            // 修正旋轉中心補償
+            svg.style.transform = `rotate(${currentRotation - 90}deg)`;
+            
+            setTimeout(() => { isSpinning = false; }, 2000);
+        }
+
+        initApp();
+    </script>
+</body>
+</html>
